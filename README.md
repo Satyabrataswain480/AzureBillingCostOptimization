@@ -3,43 +3,8 @@
 ## Overview
 This solution introduces a tiered data architecture using Azure Cosmos DB to reduce costs while maintaining high availability and seamless access. It leverages provisioned throughput and serverless containers as Hot and Cold storage tiers respectively.
 
----
-
-## Architecture Diagram (Text Format)
-
-+----------------------+            
-| Client Applications  |
-+----------------------+            
-          │                        
-          ▼                        
-+----------------------+           
-| API Management Layer |
-+----------------------+           
-          │                        
-          ▼                        
-+-------------------------------------------+
-| Azure Function (Unified Query Proxy)      |
-| - Queries Hot Container first             |
-| - Falls back to Cold Container            |
-+-------------------------------------------+
-          │                        
-          ▼                        
-+----------------------+        +----------------------+           
-| Cosmos DB (Hot Tier) |        | Cosmos DB (Cold Tier)|           
-| Provisioned Throughput|       | Serverless Mode      |           
-| Recent Data (<3 months)|      | Archived Data (>3 months)|        
-+----------------------+        +----------------------+           
-          ▲                             ▲                         
-          │                             │                         
-          └─────────── Change Feed ─────┘                         
-                     │                                            
-                     ▼                                            
-       +------------------------------------+                     
-       | Azure Function (Archiver)         |                     
-       | - Moves old records to Cold Tier  |                     
-       +------------------------------------+
-
 🧠 Design Details
+
 🔸 Hot Tier (Provisioned Throughput)
 Stores records from the last 3 months
 
@@ -70,6 +35,7 @@ Disable unnecessary indexing on Cold tier to save RU/s
 Optionally use Azure Cache for Redis for hot paths on cold data
 
 📚 Required NuGet Packages
+
 Microsoft.Azure.Cosmos
 
 Microsoft.Azure.Functions.Worker
@@ -132,26 +98,21 @@ Validation and Monitoring
 ## Summary
 This Cosmos DB tiered solution balances performance and cost by smartly separating active and historical billing data. It requires no changes to API interfaces and provides a robust path to scalability and operational efficiency.
 
-Cost and Performance Impact
-Metric	Hot Container	Cold Container
-Throughput Cost	Higher (provisioned)	Lower (serverless)
-Storage Cost	Standard	Standard
-Access Latency	Milliseconds	Seconds (rarely accessed)
-Monthly Savings	~40-60% (estimated)	
 
-Metric	            Hot Container	        Cold Container
-Throughput Cost	    Higher (provisioned)	Lower (serverless)
-Storage Cost	    Standard	            Standard
-Access Latency	    Milliseconds	        Seconds (rarely accessed)
-
-Monthly Savings	~40-60% (estimated)	
+![image](https://github.com/user-attachments/assets/09e4f64b-8ce4-41c3-85b9-05cfb2bba578)
 
 
 
-Why Cosmos DB Serverless Instead of Azure Storage?
+
+
+
+
+**Why Cosmos DB Serverless Instead of Azure Storage?**
+
 Azure Cosmos DB is better suited for this scenario due to its rich querying capabilities, automatic indexing, and ability to handle structured data efficiently. Azure Storage, while cost-effective for unstructured data (e.g., blobs), lacks the querying features and consistency models required for seamless integration into your current system without changes to API contracts.
 
 Key Advantages of Cosmos DB Serverless:
+
 Cost Efficiency: Serverless mode charges only for Request Units (RUs) consumed during operations, making it ideal for storing rarely accessed historical records.
 
 Querying Capabilities: Cosmos DB supports SQL-like queries, allowing seamless access to archived records without modifying the API.
@@ -159,21 +120,29 @@ Querying Capabilities: Cosmos DB supports SQL-like queries, allowing seamless ac
 Ease of Integration: Using Cosmos DB serverless ensures minimal architectural changes since both hot and cold containers remain within the same database ecosystem.
 
 Why Not Azure Storage?
+
 Azure Storage is primarily designed for unstructured data and lacks built-in query capabilities. Retrieving data from Azure Storage typically requires direct access via keys, which would necessitate changes to your API contracts and complicate implementation. Additionally, Azure Storage does not support features like automatic indexing or partitioning that are critical for handling structured billing records efficiently.
 
 Thus, the solution remains within the Cosmos DB ecosystem by utilizing serverless mode for cost optimization while maintaining simplicity and compatibility with your existing architecture.
 
-Optional Solutions:
+🆚 Comparison: Blob Storage Archival vs. Cosmos DB Hot + Serverless Cold Containers
+
+![image](https://github.com/user-attachments/assets/55525668-ceed-48ae-b724-2294b89646aa)
+
+
+
+**Optional Solutions:**
 
 🌗 Hybrid Model: 3-Tier Data Storage for Billing Records
+
 This model adds a third, deep-cold tier (Blob Storage) for long-term historical data. Here’s how it works:
 
 🧱 Storage Tiers
-Tier	Storage Type	Data Age	Purpose
-Hot Tier	Cosmos DB (provisioned throughput)	Last 3 months	Fast read/write for active data
-Warm Tier	Cosmos DB (serverless)	3–12 months	Moderate access, reduced cost
-Cold Tier	Azure Blob Storage (Cool or Archive tier)	Older than 12 months	Very infrequent access, ultra-low cost
+![image](https://github.com/user-attachments/assets/4c152f52-6b66-4d8e-bbf9-ace19eda3039)
+
+
 🔄 Data Flow
+
 1. Write Path
 All billing records initially land in the Hot Tier Cosmos DB container.
 
@@ -204,10 +173,9 @@ Return response to client – same format, no contract change
 You can add caching (e.g., Redis) to reduce repeated cold lookups.
 
 💰 Cost Impact by Tier
-Tier	Cost	Notes
-Hot	$$$	RU-intensive, but needed for performance
-Warm	$$	Cosmos DB serverless is cheaper, pay-per-request
-Cold	$	Blob Storage costs ~90% less than Cosmos DB
+![image](https://github.com/user-attachments/assets/c7adf6c5-ab2c-4f05-b71e-7b20cb784185)
+
+
 Blob cost examples (2025 estimates, region-dependent):
 
 Blob Storage Cool Tier: ~$0.01/GB/month
@@ -223,21 +191,46 @@ Blob Storage Lifecycle Policy: auto-transition blobs to Archive tier.
 
 Monitoring: Log telemetry and track archive job failures.
 
-🖼️ Diagram (Text-based layout)
+🖼️ Diagram 
+ 
+![image](https://github.com/user-attachments/assets/cf4b5e92-0d1f-4346-8322-7f69271e196a)
 
-                    +---------------------------+
-                    |        Client/API         |
-                    +------------+--------------+
-                                 |
-                           Read/Write Request
-                                 |
-                    +------------v------------+
-                    |     Azure Function      |  <-- Proxy Layer
-                    +------------+------------+
-                                 |
-         +-----------------------+--------------------------+
-         |                       |                          |
-+--------v--------+    +---------v---------+     +----------v-----------+
-| Hot Tier (3 mo) |    | Warm Tier (9 mo)  |     | Cold Tier (Blob >12m)|
-| Cosmos DB (RU/s)|    | Cosmos DB Serverless|   | + Table Storage Index |
-+-----------------+    +-------------------+     +----------------------+
+
+**Note : Used multiple AI tools like Microsoft Copilot, Chat gpt, Perplexity to find out the best solution.**
+
+**Prompts for Solution Development**
+
+Problem Statement Prompt
+
+We are facing a cost optimization challenge with our Azure Cosmos DB, which stores billing records. The database is read-heavy, but records older than three months are rarely accessed. How can we optimize costs while maintaining data availability and ensuring no changes to our API contracts?
+
+Which is better to use Azure Cosmos Db & Storage account or Azure Provisioned Cosmos DB & Serversless Cosmos DB?
+
+Why Cosmos DB Serverless Instead of Azure Storage?
+
+
+Why we will choose 
+
+Architecture Diagram Prompt
+
+Please provide an architecture diagram illustrating a cost-optimized solution for managing billing records in Azure Cosmos DB. The solution should include hot and cold storage tiers and ensure seamless data access.
+
+Implementation Steps Prompt
+
+Describe the step-by-step implementation process for a cost-optimized Azure Cosmos DB solution using hot and cold containers. Include details on data migration, query routing, and cost optimization strategies.
+
+Code Snippets Prompt
+
+Provide C# code snippets for implementing core logic in Azure Functions, such as data archival from a hot container to a cold container and a unified query proxy to handle requests transparently.
+
+Cost Analysis Prompt
+
+Analyze the potential costs associated with using serverless mode for Azure Cosmos DB, including storage, request units, and additional operational costs. How can these costs be optimized?
+
+Performance Considerations Prompt
+
+Discuss performance considerations when using serverless mode for Azure Cosmos DB, including latency, throughput, and scalability limits. How can these factors be managed to ensure optimal performance?
+
+Monitoring and Optimization Prompt
+
+Outline strategies for monitoring and optimizing Azure Cosmos DB serverless mode to ensure cost-effectiveness and performance. Include tools and techniques for tracking RU consumption and adjusting data models or queries.
